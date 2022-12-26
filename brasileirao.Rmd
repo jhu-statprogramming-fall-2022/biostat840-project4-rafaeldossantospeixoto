@@ -1,0 +1,323 @@
+---
+title: "Brasileirao"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(here)
+library(lubridate)
+library(plotly)
+```
+
+```{r, include=FALSE}
+# tests if a directory named "data" exists locally
+if(!dir.exists(here("data"))) { dir.create(here("data")) }
+
+# saves data only once (not each time you knit a R Markdown)
+if(!file.exists(here("data","brasileirao.RDS"))) {
+    url_csv <- "https://raw.githubusercontent.com/adaoduque/Brasileirao_Dataset/master/campeonato-brasileiro-full.csv"
+
+    brasileirao <- readr::read_csv(url_csv, show_col_types = FALSE) %>%
+        select(c(data, rodata, mandante, visitante, vencedor, mandante_Placar, visitante_Placar)) %>%
+        rename(date = data,
+               round = rodata,
+               home = mandante,
+               away = visitante,
+               winner = vencedor,
+               home_score = mandante_Placar,
+               away_score = visitante_Placar) %>%
+        mutate(date = lubridate::dmy(date)) %>%
+        filter(date > lubridate::ymd("2016-01-01")) %>%
+        select(date, round, home, away, winner) %>%
+        pivot_longer(cols = c(home, away), values_to = "team", names_to = "location") %>%
+        mutate(points = case_when(winner == team ~ 3,
+                                  winner == "-" ~ 1,
+                                  TRUE ~ 0),
+               victory = case_when(winner == team ~ 1,
+                                   TRUE ~ 0),
+               draw = case_when(winner == "-" ~ 1,
+                                TRUE ~ 0),
+               year = factor(lubridate::year(date))) %>% 
+        select(-winner)
+
+    # save the file to RDS objects
+    saveRDS(brasileirao, file=here("data", "brasileirao.RDS"))
+}
+
+brasileirao <- readRDS(here("data", "brasileirao.RDS"))
+```
+
+
+# About
+
+## 
+### Intro
+In project 1, I created a [data analysis](https://rafaeldossantospeixoto.github.io/biostat840-intro-dossantospeixoto-rafael/data_analysis.html) to show that Palmeiras is the best soccer team in Brazil and consequently in the world. However, the data from the last Brazilian championship was not available at that time. Now, all the data is available! Besides, this dashboard also has the objective to allow the user to analyse the data, changing the parameters of the analysis and make their own conclusions.
+
+### Palmeiras
+![Palmeiras celebrating the Brazilian Championship of 2022 title!](https://live.staticflickr.com/65535/52490026326_243a9cb629_h.jpg){width="550"}
+
+## 
+### Description
+
+<iframe
+    width="640"
+    height="480"
+    src="https://youtu.be/-fxlqQ1MK40"
+    frameborder="0"
+    allow="autoplay; encrypted-media"
+    allowfullscreen
+>
+</iframe>
+
+
+# The Data
+
+## 
+### Description
+The data used was collected by Adão Duque and it is available on his [github repo](https://github.com/adaoduque/Brasileirao_Dataset) and also on [kaggle](https://www.kaggle.com/datasets/adaoduque/campeonato-brasileiro-de-futebol?resource=download). It shows 16 columns for the the 8025 Brazilian League matches between the years of 2003 and 2022. A file called [*Legenda.txt*](https://raw.githubusercontent.com/rafaeldossantospeixoto/biostat840-intro-dossantospeixoto-rafael/master/data/br/Legenda.txt) includes the dictionary for the data.
+
+The original data had one row per match, but it was processed to be with one team per row. In other words, every match has two rows. This facilitates the downstream analysis. In addition, some columns were dropped because they would not be used and the rest was translated to English. 
+
+Finally, we only selected the seasons of 2016 and after. The result can be seen on the table.
+
+
+## 
+### Data
+
+```{r, echo=FALSE}
+DT::renderDataTable({
+  DT::datatable(brasileirao,
+                caption = htmltools::tags$caption(
+                  style = 'caption-side: top; text-align: Left;',
+                  htmltools::withTags(
+                    div(HTML('Data.')))),
+                options = list(autoWidth = TRUE,
+                               pageLength = 10,
+                               scroller = TRUE,
+                               scrollY = '450px'))
+})
+```
+
+
+
+# The Championship
+
+## 
+### How it works
+
+In the Brazilian Championship, there are 20 teams and each one plays against the other twice: one home match and one away. The top 4 teams go to the South America Cup (Libertadores) and the bottom 4 go to the B League. The point range differs every years, but based on the previous seasons, a team needs 78 points to be the champion. Usually teams score better in their home matches and in some cases, they have only their own fans there because of violence against rival fans.
+
+### Home and away points
+ 
+```{r}
+home_away_points <- brasileirao %>% 
+    group_by(year, location) %>% 
+    summarize(sum_points = sum(points)) %>% 
+    mutate(year = factor(year)) %>% 
+    ggplot(aes(x=year, y=sum_points, fill=location)) + 
+        geom_bar(stat="identity", position=position_dodge()) +
+        labs(title="Home and away points per season", 
+             subtitle="Points since 2016",
+             caption="Season 2020 (Covid year) had no fans in the stadium and the difference decreased.",
+             x="Season", y="Points", fill="Location")
+
+ggplotly(home_away_points)
+```
+
+
+## 
+### Points per season
+
+```{r}
+points_violin <- brasileirao %>% 
+    group_by(year, team) %>% 
+    summarize(sum_points = sum(points)) %>% 
+    mutate(year = factor(year)) %>% 
+    ggplot(aes(x=year, y=sum_points)) + 
+        geom_violin() +
+        labs(title="Dispersion of points of each team per season", 
+             subtitle="Points since 2016",
+             caption="Season 2020 (Covid year) and 2021 show different patterns.",
+             x="Season", y="Points")
+
+ggplotly(points_violin)
+```
+
+
+
+# Best Teams
+
+## 
+### List of best teams
+
+We summed the points of all seasons and ordered the teams based on this value.
+
+```{r, include=FALSE}
+best_teams <- brasileirao %>% 
+    group_by(team) %>% 
+    summarize(sum_points = sum(points)) %>% 
+    arrange(desc(sum_points))
+```
+
+```{r}
+DT::renderDataTable({
+  DT::datatable(best_teams,
+                caption = htmltools::tags$caption(
+                  style = 'caption-side: top; text-align: Left;',
+                  htmltools::withTags(
+                    div(HTML('Ordered teams.')))),
+                options = list(autoWidth = TRUE,
+                               pageLength = 10,
+                               scroller = TRUE,
+                               scrollY = '450px'))
+})
+```
+
+
+## 
+### Best teams over the years
+
+```{r}
+best_team_graph <- brasileirao %>% 
+    group_by(team, year) %>% 
+    summarize(sum_points = sum(points)) %>% 
+    filter(team %in% c("Palmeiras", "Flamengo", "Atletico-MG", "Santos", "Corinthians")) %>% 
+    ggplot(aes(x=year, y=sum_points, color=team)) +
+        geom_point() +
+        labs(title="Points per year in the Brazilian League", 
+             subtitle="Points of the top 5 teams since 2016",
+             caption="Palmeiras and Flamengo the same amount of titles.",
+             x="Season", y="Points", color="Team")
+    
+ggplotly(best_team_graph)
+```
+
+
+# Comparing teams
+
+## Select teams {.sidebar data-width=300}
+
+```{r}
+selectInput(inputId = "team1_selected", 
+              label = "Select the first team",
+            choices = brasileirao %>% 
+              pull(team) %>% 
+              unique() %>%
+              sort(), selected = "Palmeiras")
+
+selectInput(inputId = "team2_selected", 
+              label = "Select the second team",
+            choices = brasileirao %>% 
+              pull(team) %>% 
+              unique() %>%
+              sort(), selected = "Flamengo")
+
+# Washington, D.C. gets excluded by this
+```
+
+
+## 
+### Graph
+
+```{r}
+output$plot <- renderPlotly({
+    brasileirao %>% 
+    group_by(team, year) %>% 
+    summarize(points_victory=sum(victory)*3, points_draw=sum(draw)) %>% 
+    mutate(points_lost=((38*3)-points_victory-points_draw)) %>% # there are 38 games in total
+    filter(team %in% c(input$team1_selected, input$team2_selected)) %>% 
+    pivot_longer(c(points_victory, points_draw, points_lost), values_to="n_results", names_to="results") %>% 
+    ggplot(aes(x=team, y=n_results, fill=results)) +
+        geom_bar(position="stack", stat = "identity") +
+        facet_wrap(. ~ year) + 
+        labs(title="Results per year in the Brazilian League", 
+             subtitle="Results since 2016",
+             caption="The teams overcame each other in the same amount of seasons.",
+             x="Team", y="Number of Matches", fill="Result") +
+        scale_fill_discrete(labels=c('Draw', 'Loss', 'Win'))
+  })
+```
+
+```{r}
+plotlyOutput("plot")
+```
+
+# Comparing Championships
+
+## Select championships {.sidebar data-width=300}
+
+```{r}
+selectInput(inputId = "champ1_selected", 
+              label = "Select the first year",
+            choices = brasileirao %>% 
+              pull(year) %>% 
+              unique() %>%
+              sort(), selected = 2022)
+
+selectInput(inputId = "champ2_selected", 
+              label = "Select the second year",
+            choices = brasileirao %>% 
+              pull(year) %>% 
+              unique() %>%
+              sort(), selected = 2021)
+```
+
+
+## 
+### Table comparing the seasons
+
+```{r, include=FALSE}
+output$mytable <- DT::renderDataTable({
+  DT::datatable(brasileirao %>% 
+    group_by(year, round) %>% 
+    summarise(points = sum(points), 
+              victories = sum(victory)) %>% 
+    mutate(cs_points = cumsum(points),
+           cs_victories = cumsum(victories)) %>%
+    filter(year %in% c(input$champ1_selected, input$champ2_selected)) %>% 
+    mutate(year = factor(year)) %>% 
+    pivot_wider(id_cols = round,
+                names_from = year,
+                values_from = c(cs_points, cs_victories)) %>% 
+    mutate(difference_points = get(paste0("cs_points_", input$champ1_selected)) - get(paste0("cs_points_", input$champ2_selected)),
+           difference_victories = get(paste0("cs_victories_", input$champ1_selected)) - get(paste0("cs_victories_", input$champ2_selected))),
+                caption = htmltools::tags$caption(
+                  style = 'caption-side: top; text-align: Left;',
+                  htmltools::withTags(
+                    div(HTML('Comparing Championships.')))),
+                options = list(autoWidth = TRUE,
+                               pageLength = 10,
+                               scroller = TRUE,
+                               scrollY = '450px'))
+})
+```
+
+
+```{r}
+DT::dataTableOutput("mytable")
+```
+
+
+
+
+# Analysis
+
+##
+### Palmeiras is the Best!
+The analysis showed that Palmeiras and Flamengo have been the best Brazilian teams since 2016. They have had similar aspects in different statistics. However, Palmeiras overcame Flamengo in the total number of points, victories and number of championships. In addition, Palmeiras has a larger amount of Brazilian trophies than Flamengo and any other team. Therefore, Palmeiras is the best team in Brazil. Since Brazil has the best soccer in the world, Palmeiras is also the best team in the world!
+
+##
+### Supercopa do Brasil
+In 2022, Palmeiras won the Brazilian League and Flamengo won the Brazilian Cup. Next year, they will play the Brazilian Super Cup, a two-game tournament to decide who deserves the trophy for the 2022 year.
+
+![Super Cup 2022](https://assets.goal.com/v3/assets/bltcc7a7ffd2fbf71f5/blt56bfbe8aa44631e3/60dac333c5c41538a150832e/b6c7a894cb0eee8f88fcb61fbb5efdb50b3c1f09.jpg){width="450"}
